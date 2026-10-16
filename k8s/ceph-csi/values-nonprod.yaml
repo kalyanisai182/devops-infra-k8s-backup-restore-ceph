@@ -1,0 +1,23 @@
+csiConfig:
+  - clusterID: "beecf5e0-f73e-423e-a21b-4e5e3a4652c6"
+    monitors:
+      - "10.30.4.76:6789"
+      - "10.30.4.99:6789"
+provisioner:
+  replicaCount: 2
+storageClass:
+  create: true
+  name: ceph-rbd
+  clusterID: "beecf5e0-f73e-423e-a21b-4e5e3a4652c6"
+  pool: k8s-nonprod
+  imageFeatures: layering
+  fstype: ext4
+  provisionerSecret: csi-rbd-secret
+  controllerExpandSecret: csi-rbd-secret
+  nodeStageSecret: csi-rbd-secret
+  reclaimPolicy: Delete
+  allowVolumeExpansion: true
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+secret:
+  create: false
