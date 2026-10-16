@@ -10,3 +10,4 @@ crash.log
 creds*
 *.key
 *.pem
+.vault_pass
