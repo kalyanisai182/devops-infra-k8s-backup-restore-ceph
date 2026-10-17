@@ -14,3 +14,4 @@ Fixes along the way:
 
 Next try (rolling restart): ms_bind_before_connect = true for mons,
 or put the VM on VLAN 304 (10.30.4.x).
+- Lead: asymmetric routing (fixed in Phase 4 with static routes) may be the real cause. Retry mon3.
