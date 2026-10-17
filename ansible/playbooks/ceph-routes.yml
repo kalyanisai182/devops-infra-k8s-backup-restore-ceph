@@ -1,0 +1,38 @@
+---
+- name: Routes to Ceph via the Proxmox hosts (avoid asymmetric routing)
+  hosts: k8s:ceph_mon
+  become: true
+  tasks:
+    - name: Netplan file with routes to the Ceph host IPs
+      ansible.builtin.copy:
+        dest: /etc/netplan/60-ceph-routes.yaml
+        mode: "0600"
+        content: |
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                routes:
+                  - to: 10.30.4.76/32
+                    via: 10.30.5.20
+                  - to: 10.30.4.99/32
+                    via: 10.30.5.21
+
+    - name: Read the combined eth0 routes
+      ansible.builtin.command: netplan get ethernets.eth0.routes
+      register: merged
+      changed_when: false
+
+    - name: Show the combined routes
+      ansible.builtin.debug:
+        var: merged.stdout_lines
+
+    - name: Stop if the default route or our routes are missing
+      ansible.builtin.assert:
+        that:
+          - "'default' in merged.stdout"
+          - "'10.30.4.76' in merged.stdout"
+          - "'10.30.4.99' in merged.stdout"
+
+    - name: Apply netplan
+      ansible.builtin.command: netplan apply
