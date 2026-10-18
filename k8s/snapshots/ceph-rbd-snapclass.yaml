@@ -1,0 +1,12 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: ceph-rbd-snapclass
+  labels:
+    velero.io/csi-volumesnapshot-class: "true"
+driver: rbd.csi.ceph.com
+deletionPolicy: Delete
+parameters:
+  clusterID: "beecf5e0-f73e-423e-a21b-4e5e3a4652c6"
+  csi.storage.k8s.io/snapshotter-secret-name: csi-rbd-secret
+  csi.storage.k8s.io/snapshotter-secret-namespace: ceph-csi-rbd
