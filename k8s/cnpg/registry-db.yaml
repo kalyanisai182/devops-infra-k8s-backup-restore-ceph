@@ -1,0 +1,64 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: ceph-store
+  namespace: model-registry
+spec:
+  retentionPolicy: "7d"
+  configuration:
+    destinationPath: s3://pg-backups/nonprod/
+    endpointURL: https://10.30.5.20:7443
+    endpointCA:
+      name: rgw-ca
+      key: ca.crt
+    s3Credentials:
+      accessKeyId:
+        name: s3-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: s3-creds
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  instanceSidecarConfiguration:
+    env:
+      - name: AWS_REQUEST_CHECKSUM_CALCULATION
+        value: when_required
+      - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+        value: when_required
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: registry-db
+  namespace: model-registry
+spec:
+  instances: 1
+  storage:
+    size: 2Gi
+    storageClass: ceph-rbd
+  bootstrap:
+    initdb:
+      database: registry
+      owner: registry
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: ceph-store
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: registry-nightly
+  namespace: model-registry
+spec:
+  schedule: "0 0 1 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: registry-db
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
