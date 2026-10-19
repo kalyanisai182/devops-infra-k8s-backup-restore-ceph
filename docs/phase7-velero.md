@@ -11,3 +11,9 @@
   "Signature rejected: 'content-type' supplied but not in CanonicalHeaders"
 - minio-go (used by Kopia) streams unsigned headers over plain HTTP
 - Fix: HTTPS on RGW (port 7443, own CA), BSL s3Url https + caCert
+
+# Phase 7.3-7.5
+- CNPG 1.30.1 + Barman Cloud plugin 0.15.1: WAL archiving + nightly base backup -> s3://pg-backups/nonprod (HTTPS)
+- PITR drill: DROP TABLE, restored new cluster to the second before -> all rows back
+- etcd: scripts/etcd-backup.sh (snapshot + PKI) -> s3://k8s-etcd/<env>, cron 03:00/03:15, 7-day local retention
+- scripts/backup-check.sh daily 08:00: etcd/velero freshness (<26h), CNPG archiving + last backup
