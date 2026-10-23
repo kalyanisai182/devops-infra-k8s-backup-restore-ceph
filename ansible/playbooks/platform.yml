@@ -1,0 +1,105 @@
+---
+- name: Install platform components (Ceph CSI, snapshots, Velero)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    repo_dir: "{{ playbook_dir }}/../.."
+    kubeconfig: "/root/.kube/ceph-{{ target_env }}.conf"
+    csi_chart_version: "3.18.1"
+    snapshotter_ref: "v8.2.0"
+    velero_plugin: "velero/velero-plugin-for-aws:v1.14.0"
+    rgw_url: "https://10.30.5.20:7443"
+    schedule_cron: "{{ '0 2 * * *' if target_env == 'nonprod' else '30 2 * * *' }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  tasks:
+    - name: Check the environment name
+      ansible.builtin.assert:
+        that: target_env is defined and target_env in ['nonprod', 'prod']
+        fail_msg: "Run with -e target_env=nonprod or -e target_env=prod"
+
+    - name: Create the ceph-csi-rbd namespace
+      ansible.builtin.shell: kubectl create namespace ceph-csi-rbd --dry-run=client -o yaml | kubectl apply -f -
+      register: ns
+      changed_when: "'created' in ns.stdout"
+
+    - name: Create the Ceph CSI secret (key read from Ceph, not printed)
+      ansible.builtin.shell: >
+        kubectl -n ceph-csi-rbd create secret generic csi-rbd-secret
+        --from-literal=userID=k8s-{{ target_env }}
+        --from-literal=userKey="$(ceph auth get-key client.k8s-{{ target_env }})"
+        --dry-run=client -o yaml | kubectl apply -f -
+      no_log: true
+      register: sec
+      changed_when: "'unchanged' not in sec.stdout"
+
+    - name: Add the Ceph CSI Helm repository
+      ansible.builtin.command: helm repo add ceph-csi https://ceph.github.io/csi-charts --force-update
+      changed_when: false
+
+    - name: Install or upgrade Ceph CSI
+      ansible.builtin.command: >
+        helm upgrade --install ceph-csi-rbd ceph-csi/ceph-csi-rbd
+        --version {{ csi_chart_version }} -n ceph-csi-rbd
+        -f {{ repo_dir }}/k8s/ceph-csi/values-{{ target_env }}.yaml
+        --wait --timeout 10m
+
+    - name: Install the snapshot CRDs
+      ansible.builtin.command: kubectl apply -f {{ repo_dir }}/k8s/snapshots/snapshot-crds-v8.2.0.yaml
+
+    - name: Wait for the snapshot CRDs
+      ansible.builtin.command: kubectl wait --for condition=established --timeout=60s crd/volumesnapshotclasses.snapshot.storage.k8s.io
+      changed_when: false
+
+    - name: Install the snapshot controller
+      ansible.builtin.command: kubectl apply -f {{ repo_dir }}/k8s/snapshots/snapshot-controller-v8.2.0.yaml
+
+    - name: Create the VolumeSnapshotClass
+      ansible.builtin.command: kubectl apply -f {{ repo_dir }}/k8s/snapshots/ceph-rbd-snapclass.yaml
+
+    - name: Check whether Velero is installed
+      ansible.builtin.command: kubectl -n velero get deployment velero
+      register: velero_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install Velero (same bucket as before)
+      ansible.builtin.command: >
+        velero install --provider aws
+        --plugins {{ velero_plugin }}
+        --bucket velero-{{ target_env }}
+        --secret-file /root/ceph-s3/velero-credentials
+        --backup-location-config region=default,s3ForcePathStyle=true,s3Url={{ rgw_url }}
+        --cacert /root/rgw-tls/ca.crt
+        --use-node-agent --use-volume-snapshots=false --wait
+      when: velero_check.rc != 0
+
+    - name: Wait for the backup location to be Available
+      ansible.builtin.command: kubectl -n velero get backupstoragelocation default -o jsonpath={.status.phase}
+      register: bsl
+      until: bsl.stdout == "Available"
+      retries: 20
+      delay: 15
+      changed_when: false
+
+    - name: Wait until Velero lists the existing backups
+      ansible.builtin.command: velero backup get
+      register: backups
+      until: "'Completed' in backups.stdout"
+      retries: 8
+      delay: 15
+      failed_when: false
+      changed_when: false
+
+    - name: Show the backups
+      ansible.builtin.debug:
+        var: backups.stdout_lines
+
+    - name: Create the nightly schedule if it is missing
+      ansible.builtin.shell: >
+        velero schedule get nightly-all ||
+        velero schedule create nightly-all --schedule="{{ schedule_cron }}"
+        --ttl 168h0m0s --snapshot-move-data
+      register: sched
+      changed_when: "'created successfully' in sched.stdout"
